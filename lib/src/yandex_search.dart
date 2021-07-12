@@ -1,12 +1,38 @@
 part of yandex_mapkit;
 
 class YandexSearch {
+
   static const String _channelName = 'yandex_mapkit/yandex_search';
 
   static const MethodChannel _channel = MethodChannel(_channelName);
 
   static int _nextCallbackId = 0;
   static final Map<int, SuggestSessionCallback> _suggestSessionsById = {};
+
+  static SearchSessionCallback? _searchSessionCallback;
+  static SearchErrorCallback?   _searchErrorCallback;
+
+  static Future<void> _handleMethodCall(MethodCall call) async {
+    switch (call.method) {
+      case 'onSuggestListenerResponse':
+        _onSuggestListenerResponse(call.arguments);
+        break;
+      case 'onSuggestListenerError':
+        _onSuggestListenerError(call.arguments);
+        break;
+      case 'onSuggestListenerRemove':
+        _onSuggestListenerRemove(call.arguments);
+        break;
+      case 'onSearchListenerResponse':
+        _onSearchListenerResponse(call.arguments);
+        break;
+      case 'onSearchListenerError':
+        _onSearchListenerError(call.arguments);
+        break;
+      default:
+        throw MissingPluginException();
+    }
+  }
 
   static Future<CancelSuggestCallback> getSuggestions({
     required String address,
@@ -36,22 +62,6 @@ class YandexSearch {
     );
 
     return () => _cancelSuggestSession(listenerId);
-  }
-
-  static Future<void> _handleMethodCall(MethodCall call) async {
-    switch (call.method) {
-      case 'onSuggestListenerResponse':
-        _onSuggestListenerResponse(call.arguments);
-        break;
-      case 'onSuggestListenerError':
-        _onSuggestListenerError(call.arguments);
-        break;
-      case 'onSuggestListenerRemove':
-        _onSuggestListenerRemove(call.arguments);
-        break;
-      default:
-        throw MissingPluginException();
-    }
   }
 
   static void _onSuggestListenerRemove(dynamic arguments) {
@@ -90,5 +100,88 @@ class YandexSearch {
 
   static void _onSuggestListenerError(dynamic arguments) {
     _cancelSuggestSession(arguments['listenerId']);
+  }
+
+  static Future<void> searchByText({
+    required  String                searchText,
+    required  Geometry              geometry,
+    required  SearchOptions         searchOptions,
+    required  SearchSessionCallback onSearchResponse,
+              SearchErrorCallback?  onSearchError}) async {
+
+    _channel.setMethodCallHandler(_handleMethodCall);
+
+    _searchSessionCallback = onSearchResponse;
+    _searchErrorCallback   = onSearchError;
+
+    var geometryParam = {};
+
+    if (geometry.point != null) {
+      geometryParam['point'] = {
+        'latitude': geometry.point!.latitude,
+        'longitude': geometry.point!.longitude,
+      };
+    } else if (geometry.boundingBox != null) {
+      geometryParam['boundingBox'] = {
+        'southWest': {
+          'latitude': geometry.boundingBox!.southWest.latitude,
+          'longitude': geometry.boundingBox!.southWest.longitude,
+        },
+        'northEast': {
+          'latitude': geometry.boundingBox!.northEast.latitude,
+          'longitude': geometry.boundingBox!.northEast.longitude,
+        },
+      };
+    } else {
+      throw('geometry is invalid: point or boundingBox required');
+    }
+
+    var options = {
+      'searchType':                 searchOptions.searchType.index,
+      'snippets':                   [],
+      'experimentalSnippets':       [],
+      'geometry':                   searchOptions.geometry,
+      'suggestWords':               searchOptions.suggestWords,
+      'disableSpellingCorrection':  searchOptions.disableSpellingCorrection,
+    };
+
+    if (searchOptions.resultPageSize != null) {
+      options['resultPageSize'] = searchOptions.resultPageSize!;
+    }
+
+    if (searchOptions.userPosition != null) {
+      options['userPosition'] = searchOptions.userPosition!;
+    }
+
+    var params = {
+      'searchText': searchText,
+      'geometry': geometryParam,
+      'options': options,
+    };
+
+    await _channel.invokeMethod<void>(
+      'searchByText',
+      params
+    );
+  }
+
+  static void _onSearchListenerResponse(dynamic arguments) {
+
+    final Map<dynamic, dynamic> response = arguments['response'];
+
+   final respObj = SearchResponse.fromJson(response);
+
+    if (_searchSessionCallback != null) {
+      _searchSessionCallback!(respObj);
+    }
+  }
+
+  static void _onSearchListenerError(dynamic arguments) {
+
+    var errMsg = arguments['error'];
+
+    if (_searchSessionCallback != null) {
+      _searchErrorCallback!(errMsg);
+    }
   }
 }

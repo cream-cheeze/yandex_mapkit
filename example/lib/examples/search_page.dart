@@ -20,68 +20,79 @@ class _SearchExample extends StatefulWidget {
 }
 
 class _SearchExampleState extends State<_SearchExample> {
+
   TextEditingController queryController = TextEditingController();
+
   String response = '';
 
   @override
   Widget build(BuildContext context) {
     return Column(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        const SizedBox(height: 20),
-        Expanded(
-          child: SingleChildScrollView(
-            child: Column(
-              children: <Widget>[
-                const Text('Search:'),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: <Widget>[
-                    Flexible(
-                      child: TextField(
-                        controller: queryController,
-                      ),
-                    ),
-                    ControlButton(
-                      onPressed: () {
-                        querySuggestions(queryController.text);
-                      },
-                      title: 'Query'
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                const Text('Response:'),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.start,
-                  children: <Widget>[
-                    Flexible(
-                      child: Text(response)
-                    ),
-                  ],
-                ),
-              ]
-            )
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          const SizedBox(height: 20),
+          Expanded(
+              child: SingleChildScrollView(
+                  child: Column(
+                      children: <Widget>[
+                        const Text('Search:'),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceAround,
+                          children: <Widget>[
+                            Flexible(
+                              child: TextField(
+                                controller: queryController,
+                              ),
+                            ),
+                            ControlButton(
+                                onPressed: () {
+                                  search(queryController.text);
+                                },
+                                title: 'Query'
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 20),
+                        const Text('Response:'),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.start,
+                          children: <Widget>[
+                            Flexible(
+                                child: Padding(
+                                  padding: EdgeInsets.only(top: 20),
+                                  child: Text(response),
+                                )
+                            ),
+                          ],
+                        ),
+                      ]
+                  )
+              )
           )
-        )
-      ]
+        ]
     );
   }
 
-  Future<void> querySuggestions(String query) async {
-    final cancelListening = await YandexSearch.getSuggestions(
-      address: query,
-      southWestPoint: const Point(latitude: 55.5143, longitude: 37.24841),
-      northEastPoint: const Point(latitude: 56.0421, longitude: 38.0284),
-      suggestType: SuggestType.geo,
-      suggestWords: true,
-      onSuggest: (List<SuggestItem> suggestItems) {
+  Future<void> search(String query) async {
+
+    await YandexSearch.searchByText(
+      searchText: query,
+      geometry: Geometry(boundingBox: BoundingBox(
+        southWest: Point(latitude: 55.76996383933034, longitude: 37.57483142322235),
+        northEast: Point(latitude: 55.785322774728414, longitude: 37.590924677311705),
+      )),
+      searchOptions: SearchOptions(
+        searchType: SearchType.geo,
+        geometry: false,
+      ),
+      onSearchResponse: (SearchResponse res) {
         setState(() {
-          response = suggestItems.map((SuggestItem item) => item.title).join('\n');
+          response = res.toString();
         });
-      }
-    );
-    await Future<dynamic>.delayed(const Duration(seconds: 3), () => cancelListening());
+      },
+      onSearchError: (String error) {
+        print(error);
+      });
   }
 }
