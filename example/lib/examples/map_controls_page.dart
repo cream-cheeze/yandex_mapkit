@@ -23,7 +23,8 @@ class _MapControlsExampleState extends State<_MapControlsExample> {
 
   bool isNightModeEnabled = false;
   bool isZoomGesturesEnabled = false;
-
+  bool isTiltGesturesEnabled = false;
+  
   static const Point _point = Point(latitude: 59.945933, longitude: 30.320045);
 
   final String emptyStyle = '''
@@ -70,9 +71,11 @@ class _MapControlsExampleState extends State<_MapControlsExample> {
             },
             onMapRendered: () async {
               print('Map rendered');
-              var enabled = await controller!.isZoomGesturesEnabled();
+              var zoomGesturesEnabled = await controller!.isZoomGesturesEnabled();
+              var tiltGesturesEnabled = await controller!.isTiltGesturesEnabled();
               setState(() {
-                isZoomGesturesEnabled = enabled;
+                isZoomGesturesEnabled = zoomGesturesEnabled;
+                isTiltGesturesEnabled = tiltGesturesEnabled;
               });
             },
             onMapSizeChanged: (MapSize size) => print('Map size changed to ${size.width}x${size.height}'),
@@ -209,6 +212,18 @@ class _MapControlsExampleState extends State<_MapControlsExample> {
                     )
                   ],
                 ),
+                TableRow(children: <Widget>[
+                  ControlButton(
+                      onPressed: () async {
+                        setState(() {
+                          isTiltGesturesEnabled = !isTiltGesturesEnabled;
+                        });
+                        await controller!.setTiltGesturesEnabled(enabled: isTiltGesturesEnabled);
+                      },
+                      title: 'Tilt gestures: ${isTiltGesturesEnabled ? 'on' : 'off'}'
+                  ),
+                  Container(),
+                ]),
               ],
             ),
           ),

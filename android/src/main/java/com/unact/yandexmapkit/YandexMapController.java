@@ -599,6 +599,19 @@ public class YandexMapController implements PlatformView, MethodChannel.MethodCa
     return mapView.getMap().getCameraPosition().getZoom();
   }
 
+  private boolean isTiltGesturesEnabled() {
+    return mapView.getMap().isTiltGesturesEnabled();
+  }
+
+  public void setTiltGesturesEnabled(MethodCall call) {
+
+    Map<String, Object> params = ((Map<String, Object>) call.arguments);
+
+    boolean enabled = (Boolean) params.get("enabled");
+    
+    mapView.getMap().setTiltGesturesEnabled(enabled);
+  }
+
   @Override
   public void onMethodCall(MethodCall call, MethodChannel.Result result) {
     switch (call.method) {
@@ -717,6 +730,12 @@ public class YandexMapController implements PlatformView, MethodChannel.MethodCa
         Map<String, Object> userTargetPoint = getUserTargetPoint();
         result.success(userTargetPoint);
         break;
+      case "isTiltGesturesEnabled":
+        boolean isTiltGesturesEnabled = isTiltGesturesEnabled();
+        result.success(isTiltGesturesEnabled);
+      case "setTiltGesturesEnabled":
+        setTiltGesturesEnabled(call);
+        result.success(null);
       default:
         result.notImplemented();
         break;
