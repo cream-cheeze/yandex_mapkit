@@ -186,13 +186,15 @@ class YandexMapController extends ChangeNotifier {
   /// Enables listening for map camera updates
   Future<Point> enableCameraTracking({
     required CameraPositionCallback onCameraPositionChange,
-    PlacemarkStyle? style,
+    Placemark? placemarkTemplate,
   }) async {
     _cameraPositionCallback = onCameraPositionChange;
 
     final dynamic point = await _channel.invokeMethod<dynamic>(
       'enableCameraTracking',
-      style != null ? _placemarkStyleParams(style) : null
+      placemarkTemplate != null
+        ? {'placemarkTemplate': _placemarkParams(placemarkTemplate)}
+        : null
     );
     return Point(latitude: point['latitude'], longitude: point['longitude']);
   }
@@ -369,30 +371,57 @@ class YandexMapController extends ChangeNotifier {
   }
 
   Map<String, dynamic> _placemarkParams(Placemark placemark) {
-    return <String, dynamic>{
+
+    var map = <String, dynamic>{
       'hashCode': placemark.hashCode,
       'point': <String, dynamic>{
         'latitude': placemark.point.latitude,
         'longitude': placemark.point.longitude,
       },
-    }..addAll(_placemarkStyleParams(placemark.style));
-  }
-
-  Map<String, dynamic> _placemarkStyleParams(PlacemarkStyle style) {
-    return <String, dynamic>{
-      'style': <String, dynamic>{
-        'anchorX': style.iconAnchor.latitude,
-        'anchorY': style.iconAnchor.longitude,
-        'scale': style.scale,
-        'zIndex' : style.zIndex,
-        'opacity': style.opacity,
-        'isDraggable': style.isDraggable,
-        'iconName': style.iconName,
-        'rawImageData': style.rawImageData,
-        'rotationType': style.rotationType.index,
-        'direction': style.direction
-      }
+      'opacity': placemark.opacity,
+      'isDraggable': placemark.isDraggable,
+      'direction': placemark.direction,
     };
+
+    if (placemark.icon != null) {
+      
+      map['icon'] = <String, dynamic>{};
+
+      if (placemark.icon!.iconName != null) {
+        map['icon']['iconName'] = placemark.icon!.iconName!;
+      }
+
+      if (placemark.icon!.rawImageData != null) {
+        map['icon']['rawImageData'] = placemark.icon!.rawImageData!;
+      }
+      
+      if (placemark.icon!.style != null) {
+        map['icon']['style'] = placemark.icon!.style!.toJson();
+      }
+      
+    } else {
+
+      map['composite'] = <String, dynamic>{};
+      
+      placemark.compositeIcon!.forEach((k,v) {
+        
+        map['composite'][k] = <String, dynamic>{};
+
+        if (v.iconName != null) {
+          map['composite'][k]['iconName'] = v.iconName!;
+        }
+
+        if (v.rawImageData != null) {
+          map['composite'][k]['rawImageData'] = v.rawImageData!;
+        }
+
+        if (v.style != null) {
+          map['composite'][k]['style'] = v.style!.toJson();
+        }
+      });
+    }
+
+    return map;
   }
 
   Map<String, dynamic> _polylineParams(Polyline polyline) {
