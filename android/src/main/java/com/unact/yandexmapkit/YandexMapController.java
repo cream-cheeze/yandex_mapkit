@@ -25,6 +25,10 @@ import com.yandex.mapkit.logo.HorizontalAlignment;
 import com.yandex.mapkit.logo.VerticalAlignment;
 import com.yandex.mapkit.map.CameraPosition;
 import com.yandex.mapkit.map.CircleMapObject;
+import com.yandex.mapkit.map.Cluster;
+import com.yandex.mapkit.map.ClusterListener;
+import com.yandex.mapkit.map.ClusterTapListener;
+import com.yandex.mapkit.map.ClusterizedPlacemarkCollection;
 import com.yandex.mapkit.map.InputListener;
 import com.yandex.mapkit.map.MapObject;
 import com.yandex.mapkit.map.MapObjectCollection;
@@ -62,28 +66,44 @@ import io.flutter.view.FlutterMain;
 
 
 public class YandexMapController implements PlatformView, MethodChannel.MethodCallHandler {
+
   private final MapView mapView;
   private final MethodChannel methodChannel;
-  private YandexUserLocationObjectListener yandexUserLocationObjectListener;
-  private YandexCameraListener yandexCameraListener;
-  private YandexMapObjectTapListener yandexMapObjectTapListener;
-  private YandexMapInputListener yandexMapInputListener;
-  private YandexMapSizeChangedListener yandexMapSizeChangedListener;
+
+  private YandexUserLocationObjectListener  yandexUserLocationObjectListener;
+  private YandexCameraListener              yandexCameraListener;
+  private YandexMapObjectTapListener        yandexMapObjectTapListener;
+  private YandexMapInputListener            yandexMapInputListener;
+  private YandexMapSizeChangedListener      yandexMapSizeChangedListener;
+  private YandexClusterListener             yandexClusterListener;
+  private YandexClusterTapListener          yandexClusterTapListener;
+
+  private ClusterizedPlacemarkCollection clusterizedCollection;
+
   private UserLocationLayer userLocationLayer;
+
   private PlacemarkMapObject cameraTarget = null;
+
   private List<PlacemarkMapObject> placemarks = new ArrayList<>();
   private List<PolylineMapObject> polylines = new ArrayList<>();
   private List<PolygonMapObject> polygons = new ArrayList<>();
   private List<CircleMapObject> circles = new ArrayList<>();
+
+  private List<Cluster> unstyledClustersQueue = new ArrayList<>();
+
   private String userLocationIconName;
   private String userArrowIconName;
   private Boolean userArrowOrientation;
   private int accuracyCircleFillColor = 0;
 
   public YandexMapController(int id, Context context, BinaryMessenger messenger) {
+
     MapKitFactory.initialize(context);
+
     mapView = new MapView(context);
+
     MapKitFactory.getInstance().onStart();
+
     mapView.onStart();
 
     yandexMapObjectTapListener = new YandexMapObjectTapListener();
@@ -216,26 +236,159 @@ public class YandexMapController implements PlatformView, MethodChannel.MethodCa
   }
 
   @SuppressWarnings("unchecked")
-  private void addPlacemark(MethodCall call) {
+  public void addPlacemark(MethodCall call) {
 
     Map<String, Object> params = ((Map<String, Object>) call.arguments);
+
+    boolean isClusterized = params.get("isClusterized") != null ? (Boolean) params.get("isClusterized") : false;
 
     Map<String, Object> paramsPoint = ((Map<String, Object>) params.get("point"));
 
     Point point = new Point(((Double) paramsPoint.get("latitude")), ((Double) paramsPoint.get("longitude")));
 
-    PlacemarkMapObject placemark = addPlacemarkObject(point, params);
+    MapObjectCollection mapObjects = mapView.getMap().getMapObjects();
+
+    PlacemarkMapObject placemark;
+
+    if (!isClusterized) {
+      placemark = mapObjects.addPlacemark(point);
+    } else {
+
+      if (clusterizedCollection == null) {
+        yandexClusterListener = new YandexClusterListener();
+        clusterizedCollection = mapView.getMapWindow().getMap().getMapObjects().addClusterizedPlacemarkCollection(yandexClusterListener);
+      }
+
+      placemark = clusterizedCollection.addPlacemark(point);
+    }
+
+    placemark.addTapListener(yandexMapObjectTapListener);
+    setupPlacemark(placemark, params);
 
     placemarks.add(placemark);
   }
 
-  private PlacemarkMapObject addPlacemarkObject(Point point, Map<String, Object> params) {
+  public void addPlacemarks(MethodCall call) {
+
+    Map<String, Object> params = ((Map<String, Object>) call.arguments);
+
+    boolean isClusterized = params.get("isClusterized") != null ? (Boolean) params.get("isClusterized") : false;
+
+    if (params.get("points") == null || params.get("hashCodes") == null || params.get("icon") == null) {
+      return;
+    }
+
+    List<Map<String, Object>> points    = ((List<Map<String, Object>>) params.get("points"));
+    List<Object>              hashCodes = ((List<Object>) params.get("hashCodes"));
+    Map<String, Object>       icon      = ((Map<String, Object>) params.get("icon"));
+
+    List<Point> mapkitPoints = new ArrayList<>();
+
+    for (int i = 0; i < points.size(); i++) {
+
+      Map<String, Object> p = points.get(i);
+
+      Point point = new Point((Double) p.get("latitude"), (Double) p.get("longitude"));
+
+      mapkitPoints.add(point);
+    }
+
+    ImageProvider img = getIconImage(icon);
+
+    if (img == null) {
+      return;
+    }
+
+    IconStyle iconStyle = new IconStyle();
+
+    if (icon.get("style") != null) {
+      iconStyle = getIconStyle(icon);
+    }
 
     MapObjectCollection mapObjects = mapView.getMap().getMapObjects();
 
-    PlacemarkMapObject placemark = mapObjects.addPlacemark(point);
+    List<PlacemarkMapObject> newPlacemarks;
 
-    placemark.addTapListener(yandexMapObjectTapListener);
+    if (!isClusterized) {
+      newPlacemarks = mapObjects.addPlacemarks(mapkitPoints, img, iconStyle);
+    } else {
+
+      if (clusterizedCollection == null) {
+        yandexClusterListener = new YandexClusterListener();
+        clusterizedCollection = mapView.getMapWindow().getMap().getMapObjects().addClusterizedPlacemarkCollection(yandexClusterListener);
+      }
+
+      newPlacemarks = clusterizedCollection.addPlacemarks(mapkitPoints, img, iconStyle);
+    }
+
+    for (int i = 0; i < newPlacemarks.size(); i++) {
+
+      PlacemarkMapObject p = newPlacemarks.get(i);
+
+      p.setUserData(hashCodes.get(i));
+      p.addTapListener(yandexMapObjectTapListener);
+    }
+
+    placemarks.addAll(newPlacemarks);
+  }
+
+  public void clusterPlacemarks(MethodCall call) {
+
+    if (clusterizedCollection == null) {
+      return;
+    }
+
+    Map<String, Object> params = ((Map<String, Object>) call.arguments);
+
+    if (params.get("clusterRadius") == null || params.get("minZoom") == null) {
+      return;
+    }
+
+    clusterizedCollection.clusterPlacemarks((Double) params.get("clusterRadius"), (int) params.get("minZoom"));
+  }
+
+  /// Finds cluster by hashValue in the unstyledClustersQueue and sets icon.
+  /// Can be called only once on a single cluster - cluster removes from queue after it is handled.
+  public void setClusterIcon(MethodCall call) {
+
+    Map<String, Object> params = ((Map<String, Object>) call.arguments);
+
+    if (params.get("hashValue") == null) {
+      return;
+    }
+
+    int hashValue = (int) params.get("hashValue");
+
+    Cluster foundCluster      = null;
+    int     foundClusterIndex = -1;
+
+    for (int i = 0; i < unstyledClustersQueue.size(); i++) {
+      if (unstyledClustersQueue.get(i).hashCode() == hashValue) {
+        foundCluster = unstyledClustersQueue.get(i);
+        foundClusterIndex = i;
+        break;
+      }
+    }
+
+    if (foundCluster == null) {
+      return;
+    }
+
+    if (params.get("icon") != null) {
+
+      Map<String, Object> icon = ((Map<String, Object>) params.get("icon"));
+
+      ImageProvider img = getIconImage(icon);
+
+      if (img != null) {
+        foundCluster.getAppearance().setIcon(img);
+      }
+    }
+
+    unstyledClustersQueue.remove(foundClusterIndex);
+  }
+
+  private void setupPlacemark(PlacemarkMapObject placemark, Map<String, Object> params) {
 
     placemark.setUserData(params.get("hashCode"));
 
@@ -290,8 +443,6 @@ public class YandexMapController implements PlatformView, MethodChannel.MethodCa
 
       }
     }
-
-    return placemark;
   }
 
   private ImageProvider getIconImage(Map<String, Object> iconData) {
@@ -408,6 +559,21 @@ public class YandexMapController implements PlatformView, MethodChannel.MethodCa
     }
   }
 
+  private void clear() {
+
+    MapObjectCollection mapObjects = mapView.getMap().getMapObjects();
+
+    mapObjects.clear();
+
+    clusterizedCollection = null;
+
+    placemarks.clear();
+    placemarks.clear();
+    polylines.clear();
+    polygons.clear();
+    circles.clear();
+  }
+
   @SuppressWarnings("unchecked")
   private void disableCameraTracking(MethodCall call) {
     if (yandexCameraListener != null) {
@@ -429,8 +595,9 @@ public class YandexMapController implements PlatformView, MethodChannel.MethodCa
       mapView.getMap().addCameraListener(yandexCameraListener);
     }
 
+    MapObjectCollection mapObjects = mapView.getMap().getMapObjects();
+
     if (cameraTarget != null) {
-      MapObjectCollection mapObjects = mapView.getMap().getMapObjects();
       mapObjects.remove(cameraTarget);
       cameraTarget = null;
     }
@@ -443,7 +610,13 @@ public class YandexMapController implements PlatformView, MethodChannel.MethodCa
 
       Map<String, Object> placemarkTemplate = ((Map<String, Object>) params.get("placemarkTemplate"));
 
-      addPlacemarkObject(targetPoint, placemarkTemplate);
+      Map<String, Object> paramsPoint = ((Map<String, Object>) placemarkTemplate.get("point"));
+
+      Point point = new Point(((Double) paramsPoint.get("latitude")), ((Double) paramsPoint.get("longitude")));
+
+      PlacemarkMapObject placemark = mapObjects.addPlacemark(point);
+
+      setupPlacemark(placemark, placemarkTemplate);
     }
 
     Map<String, Object> arguments = new HashMap<>();
@@ -750,8 +923,24 @@ public class YandexMapController implements PlatformView, MethodChannel.MethodCa
         addPlacemark(call);
         result.success(null);
         break;
+      case "addPlacemarks":
+        addPlacemarks(call);
+        result.success(null);
+        break;
+      case "clusterPlacemarks":
+        clusterPlacemarks(call);
+        result.success(null);
+        break;
+      case "setClusterIcon":
+        setClusterIcon(call);
+        result.success(null);
+        break;
       case "removePlacemark":
         removePlacemark(call);
+        result.success(null);
+        break;
+      case "clear":
+        clear();
         result.success(null);
         break;
       case "addPolyline":
@@ -906,6 +1095,80 @@ public class YandexMapController implements PlatformView, MethodChannel.MethodCa
       arguments.put("height", newHeight);
 
       methodChannel.invokeMethod("onMapSizeChanged", arguments);
+    }
+  }
+
+  private class YandexClusterListener implements ClusterListener {
+
+    public void onClusterAdded(final Cluster cluster) {
+
+      unstyledClustersQueue.add(cluster);
+
+      final List<Integer> placemarksHashes = new ArrayList<>();
+
+      for (int i = 0; i < cluster.getPlacemarks().size(); i++) {
+
+        PlacemarkMapObject p = cluster.getPlacemarks().get(i);
+
+        placemarksHashes.add((Integer) p.getUserData());
+      }
+
+      Map<String, Object> arguments = new HashMap<String, Object>() {{
+        put("hashValue", cluster.hashCode());
+        put("size", cluster.getSize());
+        put("appearance", new HashMap<String, Object>() {{
+          put("opacity", cluster.getAppearance().getOpacity());
+          put("direction", cluster.getAppearance().getDirection());
+          put("zIndex", cluster.getAppearance().getZIndex());
+          put("geometry", new HashMap<String, Object>() {{
+            put("latitude", cluster.getAppearance().getGeometry().getLatitude());
+            put("longitude", cluster.getAppearance().getGeometry().getLongitude());
+          }});
+        }});
+        put("placemarks", placemarksHashes);
+      }};
+
+      methodChannel.invokeMethod("onClusterAdded", arguments);
+
+      if (yandexClusterTapListener == null) {
+        yandexClusterTapListener = new YandexClusterTapListener();
+      }
+
+      cluster.addClusterTapListener(yandexClusterTapListener);
+    }
+  }
+
+  private class YandexClusterTapListener implements ClusterTapListener {
+
+    public boolean onClusterTap(final Cluster cluster) {
+
+      final List<Integer> placemarksHashes = new ArrayList<>();
+
+      for (int i = 0; i < cluster.getPlacemarks().size(); i++) {
+
+        PlacemarkMapObject p = cluster.getPlacemarks().get(i);
+
+        placemarksHashes.add((Integer) p.getUserData());
+      }
+
+      Map<String, Object> arguments = new HashMap<String, Object>() {{
+        put("hashValue", cluster.hashCode());
+        put("size", cluster.getSize());
+        put("appearance", new HashMap<String, Object>() {{
+          put("opacity", cluster.getAppearance().getOpacity());
+          put("direction", cluster.getAppearance().getDirection());
+          put("zIndex", cluster.getAppearance().getZIndex());
+          put("geometry", new HashMap<String, Object>() {{
+            put("latitude", cluster.getAppearance().getGeometry().getLatitude());
+            put("longitude", cluster.getAppearance().getGeometry().getLongitude());
+          }});
+        }});
+        put("placemarks", placemarksHashes);
+      }};
+
+      methodChannel.invokeMethod("onClusterTap", arguments);
+
+      return true;
     }
   }
 }

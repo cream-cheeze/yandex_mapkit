@@ -23,6 +23,18 @@ class _PlacemarkExampleState extends State<_PlacemarkExample> {
   YandexMapController? controller;
 
   static const Point _point = Point(latitude: 59.945933, longitude: 30.320045);
+  static const _points = [
+    Point(latitude: 63.945933, longitude: 49.320045),
+    Point(latitude: 63.945933, longitude: 59.320045),
+    Point(latitude: 63.945933, longitude: 69.320045),
+    Point(latitude: 63.945933, longitude: 79.320045),
+    Point(latitude: 63.945933, longitude: 89.320045),
+    Point(latitude: 63.945933, longitude: 99.320045),
+    Point(latitude: 63.945933, longitude: 109.320045),
+    Point(latitude: 63.945933, longitude: 119.320045),
+    Point(latitude: 63.945933, longitude: 129.320045),
+    Point(latitude: 63.945933, longitude: 139.320045),
+  ];
 
   final Placemark _placemark = Placemark(
     point: _point,
@@ -43,7 +55,7 @@ class _PlacemarkExampleState extends State<_PlacemarkExample> {
   );
 
   final Placemark _compositeIconPlacemark = Placemark(
-    point: _point,
+    point: const Point(latitude: 34.820045, longitude: 45.945933),
     onTap: (Placemark self, Point point) => print('Tapped me at ${point.latitude},${point.longitude}'),
     compositeIcon: {
       'user': PlacemarkIcon.fromIconName(
@@ -138,7 +150,70 @@ class _PlacemarkExampleState extends State<_PlacemarkExample> {
                         title: 'Remove'
                     ),
                   ],
-                )
+                ),
+                const Text('Multi add and clear'),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: <Widget>[
+                    ControlButton(
+                        onPressed: () async {
+                          await controller!.addPlacemarks(
+                            points: _points,
+                            icon: PlacemarkIcon.fromIconName(
+                              iconName: 'lib/assets/place.png',
+                            ),
+                          );
+                        },
+                        title: 'Add'
+                    ),
+                    ControlButton(
+                        onPressed: () async {
+
+                          await controller!.addPlacemarks(
+                            points: _points,
+                            icon: PlacemarkIcon.fromIconName(
+                              iconName: 'lib/assets/place.png',
+                            ),
+                            isClusterized: true,
+                          );
+
+                          await controller!.clusterPlacemarks(
+                            clusterRadius: 100,
+                            minZoom: 17,
+                            addedCallback: (hashValue) {
+                              controller!.setClusterIcon(
+                                  hashValue: hashValue,
+                                  icon: PlacemarkIcon.fromIconName(
+                                    iconName: 'lib/assets/arrow.png',
+                                  )
+                              );
+                            },
+                            tapCallback: (cluster) {
+                              showDialog<String>(
+                                  context: context,
+                                  builder: (BuildContext context) => AlertDialog(
+                                title: const Text('Cluster tapped'),
+                                content: Text('Size: ${cluster.size}'),
+                                actions: <Widget>[
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(context, 'OK'),
+                                    child: const Text('OK'),
+                                  ),
+                                ],
+                              ));
+                            },
+                          );
+                        },
+                        title: 'Add with clusters'
+                    ),
+                    ControlButton(
+                        onPressed: () async {
+                          await controller!.clear();
+                        },
+                        title: 'Clear all'
+                    ),
+                  ],
+                ),
               ]
             )
           )
