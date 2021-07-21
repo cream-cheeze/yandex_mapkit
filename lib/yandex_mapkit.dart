@@ -22,6 +22,7 @@ part 'src/types/geometry.dart';
 part 'src/types/cluster.dart';
 part 'src/types/map_animation.dart';
 part 'src/types/map_size.dart';
+part 'src/types/objects_collection.dart';
 part 'src/types/placemark_style.dart';
 part 'src/types/placemark.dart';
 part 'src/types/placemark_icon.dart';

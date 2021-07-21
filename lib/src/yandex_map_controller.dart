@@ -18,6 +18,8 @@ class YandexMapController extends ChangeNotifier {
   /// Has the native view been rendered
   bool _viewRendered = false;
 
+  final List<ObjectsCollection> collections = <ObjectsCollection>[];
+
   final List<Placemark> placemarks  = <Placemark>[];
   final List<Polyline>  polylines   = <Polyline>[];
   final List<Polygon>   polygons    = <Polygon>[];
@@ -174,12 +176,47 @@ class YandexMapController extends ChangeNotifier {
     await _channel.invokeMethod<void>('clearFocusRect');
   }
 
+  /// Adds a map objects collection for grouping map objects.
+  ///
+  /// Depending on isClusterized argument adds collections of different types:
+  /// - isClusterized == false: YMKMapObjectCollection (can contain any map objects)
+  /// - isClusterized == true: YMKClusterizedPlacemarkCollection (can contain only placemarks, used for placemarks clusterization)
+  ///
+  /// If parentId == null, collection will be created in root (mapObjects) collection.
+  /// If not null parentId passed, will create a nested collection.
+  /// YMKClusterizedPlacemarkCollection can't contain nested collections,
+  /// attempts to create a collection inside it will lead to nothing.
+  Future<void> addCollection(ObjectsCollection collection, {int? parentId}) async {
+
+    var found = getCollectionById(collection.id);
+
+    // Do not add if already exists
+    if (found != null) {
+      return;
+    }
+
+    var arguments = collection.toJson();
+
+    await _channel.invokeMethod<void>('addCollection', arguments);
+
+    collections.add(collection);
+  }
+
+  ObjectsCollection? getCollectionById(int collectionId) {
+
+    var found = collections.where((coll) => coll.id == collectionId);
+
+    if (found.isNotEmpty) {
+      return found.first;
+    }
+
+    return null;
+  }
+
   /// Does nothing if passed `Placemark` is `null`
-  Future<void> addPlacemark(Placemark placemark, {bool isClusterized = false}) async {
+  Future<void> addPlacemark(Placemark placemark) async {
 
     var arguments = placemark.toJson();
-
-    arguments['isClusterized'] = isClusterized;
 
     await _channel.invokeMethod<void>('addPlacemark', arguments);
 
@@ -187,39 +224,47 @@ class YandexMapController extends ChangeNotifier {
   }
 
   /// Does nothing if passed `Placemark` is `null`
-  Future<void> addPlacemarks({required List<Point> points, required PlacemarkIcon icon, bool isClusterized = false}) async {
+  Future<List<Placemark>> addPlacemarks({required List<Point> points, required PlacemarkIcon icon, int? collectionId}) async {
 
     var arguments = <String,dynamic>{};
 
-    arguments['isClusterized']  = isClusterized;
-    arguments['points']         = points.map((p) => p.toJson()).toList();
-    arguments['icon']           = icon.toJson();
+    if (collectionId != null) {
+      arguments['collectionId'] = collectionId;
+    }
+
+    arguments['points'] = points.map((p) => p.toJson()).toList();
+    arguments['icon']   = icon.toJson();
 
     var placemarks  = <Placemark>[];
     var hashCodes   = [];
 
     for (var p in points) {
-      var placemark = Placemark(point: p, icon: icon);
+      var placemark = Placemark(point: p, icon: icon, collectionId: collectionId);
       hashCodes.add(placemark.hashCode);
+      placemarks.add(placemark);
     }
 
-    arguments['hashCodes'] = hashCodes;
+    arguments['ids'] = hashCodes;
 
     await _channel.invokeMethod<void>('addPlacemarks', arguments);
 
-    placemarks.addAll(placemarks);
+    this.placemarks.addAll(placemarks);
+
+    return placemarks;
   }
 
   /// Must be called to present clusterized placemarks after they are all added
-  /// Callback applies a Cluster hashValue to use it for cluster's icon updates
-  Future<void> clusterPlacemarks({required double clusterRadius, required int minZoom, required Function(Cluster) addedCallback, Function(Cluster)? tapCallback}) async {
+  /// and every time the placemarks collection is updated.
+  /// Callback applies a Cluster object - use it for cluster's icon updates
+  Future<void> clusterPlacemarks({required int collectionId, required double clusterRadius, required int minZoom, required Function(Cluster) addedCallback, Function(Cluster)? tapCallback}) async {
 
     _onClusterAddedCallback = addedCallback;
     _onClusterTapCallback   = tapCallback;
 
     var arguments = <String,dynamic>{
-      'clusterRadius': clusterRadius,
-      'minZoom': minZoom,
+      'collectionId':   collectionId,
+      'clusterRadius':  clusterRadius,
+      'minZoom':        minZoom,
     };
 
     await _channel.invokeMethod<void>('clusterPlacemarks', arguments);
@@ -283,19 +328,86 @@ class YandexMapController extends ChangeNotifier {
   /// Does nothing if passed `Placemark` wasn't added before
   Future<void> removePlacemark(Placemark placemark) async {
     if (placemarks.remove(placemark)) {
-      await _channel.invokeMethod<void>('removePlacemark', <String, dynamic>{'hashCode': placemark.hashCode});
+      await _channel.invokeMethod<void>('removePlacemark', <String, dynamic>{'id': placemark.hashCode});
     }
   }
 
-  /// Clears all map objects including clusterized placemarks
-  Future<void> clear() async {
+  /// Clears all map objects inside the collection including nested collections.
+  /// If collectionId == null then clears root (mapObjects) collection
+  /// Nested collections of target collection to be removed too.
+  Future<void> clear({int? collectionId}) async {
 
-    await _channel.invokeMethod<void>('clear', null);
-    
-    placemarks.clear();
-    polylines.clear();
-    polygons.clear();
-    circles.clear();
+    var arguments = {};
+
+    if (collectionId != null) {
+      arguments['collectionId'] = collectionId;
+    }
+
+    await _channel.invokeMethod<void>('clear', arguments);
+
+    if (collectionId == null) { // Root collection (mapObjects)
+
+      placemarks.clear();
+      polylines.clear();
+      polygons.clear();
+      circles.clear();
+
+      collections.clear();
+
+    } else { // Nested collection (only placemarks)
+
+      var collection = getCollectionById(collectionId);
+
+      if (collection == null) {
+        return;
+      }
+
+      if (collection.isClusterized) {
+
+        // As clusterized collections can not be nested just remove all placemarks with parent = collectionId
+        placemarks.removeWhere((p) => p.collectionId == collectionId);
+
+      } else {
+
+        var nestedCollectionsIds = <int>[];
+        nestedCollectionsIds.add(collectionId);
+        nestedCollectionsIds = _getNestedCollectionsIds(nestedCollectionsIds);
+
+        // Remove all placemarks which parents are in the nestedCollectionsIds list
+        placemarks.removeWhere((p) => nestedCollectionsIds.contains(p.collectionId));
+
+        // Remove all nested collections except current one
+        collections.removeWhere((c) => nestedCollectionsIds.contains(c.id) && c.id != collectionId);
+
+        /*
+        TODO: For now polylines, polygons and circles can be added only into the root collection (mapObjects),
+         so there is no need to clear corresponding arrays, but should be implemented if addPolyline, addPolygon or addCircle
+         will become to accept collectionId argument.
+        */
+      }
+    }
+  }
+
+  List<int> _getNestedCollectionsIds(List<int> list) {
+
+    var ids = list;
+
+    for (var c in collections) {
+
+      var id        = c.id;
+      var parentId  = c.parentId;
+
+      if (parentId == null) {
+        continue;
+      }
+
+      if (ids.contains(parentId) && !ids.contains(id)) {
+        ids.add(id);
+        _getNestedCollectionsIds(ids);
+      }
+    }
+
+    return ids;
   }
 
   Future<void> addPolyline(Polyline polyline) async {
