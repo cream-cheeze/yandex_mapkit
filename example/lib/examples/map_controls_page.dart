@@ -22,9 +22,17 @@ class _MapControlsExampleState extends State<_MapControlsExample> {
   YandexMapController? controller;
 
   bool isNightModeEnabled = false;
+<<<<<<< HEAD
   bool isZoomGesturesEnabled = false;
   bool isTiltGesturesEnabled = false;
   
+=======
+
+  bool isZoomGesturesEnabled = false;
+
+  bool isTiltGesturesEnabled = false;
+
+>>>>>>> master
   static const Point _point = Point(latitude: 59.945933, longitude: 30.320045);
 
   final String emptyStyle = '''
@@ -80,10 +88,10 @@ class _MapControlsExampleState extends State<_MapControlsExample> {
               var maxZoom = await controller!.getMaxZoom();
 
               print('Current zoom: $zoom, minZoom: $minZoom, maxZoom: $maxZoom');
-              
+
               setState(() {
-                isZoomGesturesEnabled = zoomGesturesEnabled;
                 isTiltGesturesEnabled = tiltGesturesEnabled;
+                isZoomGesturesEnabled = zoomGesturesEnabled;
               });
             },
             onMapSizeChanged: (MapSize size) => print('Map size changed to ${size.width}x${size.height}'),
