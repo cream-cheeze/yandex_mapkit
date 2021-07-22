@@ -70,9 +70,17 @@ class _MapControlsExampleState extends State<_MapControlsExample> {
               controller = yandexMapController;
             },
             onMapRendered: () async {
+
               print('Map rendered');
               var zoomGesturesEnabled = await controller!.isZoomGesturesEnabled();
               var tiltGesturesEnabled = await controller!.isTiltGesturesEnabled();
+
+              var zoom    = await controller!.getZoom();
+              var minZoom = await controller!.getMinZoom();
+              var maxZoom = await controller!.getMaxZoom();
+
+              print('Current zoom: $zoom, minZoom: $minZoom, maxZoom: $maxZoom');
+              
               setState(() {
                 isZoomGesturesEnabled = zoomGesturesEnabled;
                 isTiltGesturesEnabled = tiltGesturesEnabled;
@@ -125,7 +133,7 @@ class _MapControlsExampleState extends State<_MapControlsExample> {
                       setState(() {
                         isZoomGesturesEnabled = !isZoomGesturesEnabled;
                       });
-                      await controller!.setZoomGesturesEnabled(enabled: isZoomGesturesEnabled);
+                      await controller!.toggleZoomGesturesEnabled(enabled: isZoomGesturesEnabled);
                     },
                     title: 'Zoom gestures: ${isZoomGesturesEnabled ? 'on' : 'off'}'
                   ),
