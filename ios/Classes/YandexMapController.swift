@@ -147,8 +147,8 @@ public class YandexMapController: NSObject, FlutterPlatformView {
     case "isZoomGesturesEnabled":
       let isZoomGesturesEnabled = isZoomGesturesEnabled()
       result(isZoomGesturesEnabled)
-    case "toggleZoomGesturesEnabled":
-      toggleZoomGesturesEnabled(call)
+    case "toggleZoomGestures":
+      toggleZoomGestures(call)
       result(nil)
     case "getMinZoom":
       let minZoom = getMinZoom()
@@ -284,7 +284,7 @@ public class YandexMapController: NSObject, FlutterPlatformView {
     return mapView.mapWindow.map.isZoomGesturesEnabled
   }
   
-  public func toggleZoomGesturesEnabled(_ call: FlutterMethodCall) {
+  public func toggleZoomGestures(_ call: FlutterMethodCall) {
     let params = call.arguments as! [String: Any]
     let enabled = params["enabled"] as! Bool
     mapView.mapWindow.map.isZoomGesturesEnabled = enabled
