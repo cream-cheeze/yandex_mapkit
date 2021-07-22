@@ -227,7 +227,7 @@ class _MapControlsExampleState extends State<_MapControlsExample> {
                         setState(() {
                           isTiltGesturesEnabled = !isTiltGesturesEnabled;
                         });
-                        await controller!.setTiltGesturesEnabled(enabled: isTiltGesturesEnabled);
+                        await controller!.toggleTiltGestures(enabled: isTiltGesturesEnabled);
                       },
                       title: 'Tilt gestures: ${isTiltGesturesEnabled ? 'on' : 'off'}'
                   ),
