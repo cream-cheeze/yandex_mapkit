@@ -26,73 +26,91 @@ class _SearchExampleState extends State<_SearchExample> {
   String response = '';
 
   @override
+  void dispose() {
+
+    YandexSearch.cancelSearch(); // Cancel search request if it's in progress
+
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Column(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          const SizedBox(height: 20),
-          Expanded(
-              child: SingleChildScrollView(
-                  child: Column(
-                      children: <Widget>[
-                        const Text('Search:'),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceAround,
-                          children: <Widget>[
-                            Flexible(
-                              child: TextField(
-                                controller: queryController,
-                              ),
-                            ),
-                            ControlButton(
-                                onPressed: () {
-                                  search(queryController.text);
-                                },
-                                title: 'Query'
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 20),
-                        const Text('Response:'),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.start,
-                          children: <Widget>[
-                            Flexible(
-                                child: Padding(
-                                  padding: EdgeInsets.only(top: 20),
-                                  child: Text(response),
-                                )
-                            ),
-                          ],
-                        ),
-                      ]
-                  )
-              )
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        const SizedBox(height: 20),
+        Expanded(
+          child: SingleChildScrollView(
+            child: Column(
+              children: <Widget>[
+                const Text('Search:'),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: <Widget>[
+                    Flexible(
+                      child: TextField(
+                        controller: queryController,
+                      ),
+                    ),
+                    ControlButton(
+                      onPressed: () {
+                        search(queryController.text);
+                      },
+                      title: 'Query'
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                const Text('Response:'),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.start,
+                  children: <Widget>[
+                    Flexible(
+                      child: Padding(
+                        padding: EdgeInsets.only(top: 20),
+                        child: Text(response),
+                      ),
+                    ),
+                  ],
+                ),
+              ]
+            )
           )
-        ]
+        )
+      ]
     );
   }
 
-  Future<void> search(String query) async {
+  void search(String query) {
 
-    await YandexSearch.searchByText(
+    print('Search query: $query');
+
+    YandexSearch.searchByText(
       searchText: query,
-      geometry: Geometry(boundingBox: BoundingBox(
-        southWest: Point(latitude: 55.76996383933034, longitude: 37.57483142322235),
-        northEast: Point(latitude: 55.785322774728414, longitude: 37.590924677311705),
-      )),
+      geometry: Geometry.fromBoundingBox(
+        BoundingBox(
+          southWest: Point(latitude: 55.76996383933034, longitude: 37.57483142322235),
+          northEast: Point(latitude: 55.785322774728414, longitude: 37.590924677311705),
+        )
+      ),
       searchOptions: SearchOptions(
         searchType: SearchType.geo,
         geometry: false,
       ),
       onSearchResponse: (SearchResponse res) {
+        print('Success: ${res.toString()}');
         setState(() {
           response = res.toString();
         });
       },
       onSearchError: (String error) {
-        print(error);
-      });
+        print('Error: $error');
+      }
+    );
+
+    // Uncomment to check cancellation
+    // print('Cancel search');
+    // YandexSearch.cancelSearch();
   }
 }
