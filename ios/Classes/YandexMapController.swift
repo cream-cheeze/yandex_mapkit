@@ -145,8 +145,8 @@ public class YandexMapController: NSObject, FlutterPlatformView {
       zoomOut()
       result(nil)
     case "isZoomGesturesEnabled":
-      let isZoomGesturesEnabled = isZoomGesturesEnabled()
-      result(isZoomGesturesEnabled)
+      let enabled = isZoomGesturesEnabled()
+      result(enabled)
     case "toggleZoomGestures":
       toggleZoomGestures(call)
       result(nil)
@@ -169,8 +169,8 @@ public class YandexMapController: NSObject, FlutterPlatformView {
       let userTargetPoint = getUserTargetPoint()
       result(userTargetPoint)
     case "isTiltGesturesEnabled":
-      let isTiltGesturesEnabled = isTiltGesturesEnabled()
-      result(isTiltGesturesEnabled)
+      let enabled = isTiltGesturesEnabled()
+      result(enabled)
     case "toggleTiltGestures":
       toggleTiltGestures(call)
       result(nil)
