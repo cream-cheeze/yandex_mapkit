@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:yandex_mapkit/yandex_mapkit.dart';
 import 'package:yandex_mapkit_example/examples/widgets/control_button.dart';
 import 'package:yandex_mapkit_example/examples/widgets/map_page.dart';
@@ -23,14 +24,20 @@ class _SearchExampleState extends State<_SearchExample> {
 
   TextEditingController queryController = TextEditingController();
 
-  String response = '';
+  final List<SearchResponse> responseByPages = [];
+
+  final Map<int,SearchSession> _sessions = {};
 
   @override
-  void dispose() {
-
-    YandexSearch.cancelSearch(); // Cancel search request if it's in progress
+  void dispose() async {
 
     super.dispose();
+
+    for (var s in _sessions.values) {
+      await s.close();
+    }
+
+    _sessions.clear();
   }
 
   @override
@@ -69,7 +76,10 @@ class _SearchExampleState extends State<_SearchExample> {
                     Flexible(
                       child: Padding(
                         padding: EdgeInsets.only(top: 20),
-                        child: Text(response),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: _getList(),
+                        )
                       ),
                     ),
                   ],
@@ -82,11 +92,32 @@ class _SearchExampleState extends State<_SearchExample> {
     );
   }
 
-  void search(String query) {
+  List<Widget> _getList() {
+
+    var list = <Widget>[];
+
+    for (var r in responseByPages) {
+
+      list.add(Text('Page: ${r.page}'));
+      list.add(Container(height: 20));
+
+      r.items.asMap().forEach((i, item) {
+        list.add(Text('Item $i: ${item.toponymMetadata!.formattedAddress}'));
+      });
+
+      list.add(Container(height: 20));
+    }
+
+    return list;
+  }
+
+  void search(String query) async {
 
     print('Search query: $query');
 
-    YandexSearch.searchByText(
+    responseByPages.clear();
+
+    var sessionWithResponse = await YandexSearch.searchByText(
       searchText: query,
       geometry: Geometry.fromBoundingBox(
         BoundingBox(
@@ -98,19 +129,45 @@ class _SearchExampleState extends State<_SearchExample> {
         searchType: SearchType.geo,
         geometry: false,
       ),
-      onSearchResponse: (SearchResponse res) {
-        print('Success: ${res.toString()}');
-        setState(() {
-          response = res.toString();
-        });
-      },
-      onSearchError: (String error) {
-        print('Error: $error');
-      }
     );
 
-    // Uncomment to check cancellation
-    // print('Cancel search');
-    // YandexSearch.cancelSearch();
+    var session = sessionWithResponse.session;
+
+    _sessions[session.id] = session;
+
+    var responseOrError = await sessionWithResponse.responseOrError;
+
+    await _handleResponse(session, responseOrError);
+
+    print('No more results available, closing session...');
+    await _closeSession(session);
+  }
+
+  Future<void> _closeSession(SearchSession session) async {
+
+    await session.close();
+    _sessions.remove(session.id);
+  }
+
+  Future<void> _handleResponse(SearchSession session, SearchResponseOrError responseOrError) async {
+
+    if (responseOrError.error != null) {
+      print('Error: ${responseOrError.error}');
+      await _closeSession(session);
+      return;
+    }
+
+    var response = responseOrError.response!;
+
+    print('Page ${response.page}: ${response.toString()}');
+
+    setState(() {
+      responseByPages.add(response);
+    });
+
+    if (await session.hasNextPage()) {
+      print('Got ${response.found} items, fetching next page...');
+      await _handleResponse(session, await session.fetchNextPage());
+    }
   }
 }

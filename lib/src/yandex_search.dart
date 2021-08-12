@@ -9,8 +9,7 @@ class YandexSearch {
   static int _nextCallbackId = 0;
   static final Map<int, SuggestSessionCallback> _suggestSessionsById = {};
 
-  static SearchSessionCallback? _searchSessionCallback;
-  static SearchErrorCallback?   _searchErrorCallback;
+  static int _nextSearchSessionId = 0;
 
   static Future<void> _handleMethodCall(MethodCall call) async {
     switch (call.method) {
@@ -22,12 +21,6 @@ class YandexSearch {
         break;
       case 'onSuggestListenerRemove':
         _onSuggestListenerRemove(call.arguments);
-        break;
-      case 'onSearchListenerResponse':
-        _onSearchListenerResponse(call.arguments);
-        break;
-      case 'onSearchListenerError':
-        _onSearchListenerError(call.arguments);
         break;
       default:
         throw MissingPluginException();
@@ -102,52 +95,57 @@ class YandexSearch {
     _cancelSuggestSession(arguments['listenerId']);
   }
 
-  static Future<void> searchByText({
-    required  String                searchText,
-    required  Geometry              geometry,
-    required  SearchOptions         searchOptions,
-    required  SearchSessionCallback onSearchResponse,
-              SearchErrorCallback?  onSearchError}) async {
+  static Future<SearchResponseWithSession> searchByText({
+    required  String        searchText,
+    required  Geometry      geometry,
+    required  SearchOptions searchOptions}) async {
 
-    _channel.setMethodCallHandler(_handleMethodCall);
-
-    _searchSessionCallback = onSearchResponse;
-    _searchErrorCallback   = onSearchError;
+    var sessionId = _nextSearchSessionId++;
 
     var params = {
+      'sessionId':  sessionId,
       'searchText': searchText,
-      'geometry': geometry.toJson(),
-      'options': searchOptions.toJson(),
+      'geometry':   geometry.toJson(),
+      'options':    searchOptions.toJson(),
     };
 
-    await _channel.invokeMethod<void>(
+    var session = SearchSession(id: sessionId);
+
+    final response = _channel.invokeMethod(
       'searchByText',
       params
+    ).then((sessionResult) => session.handleResponse(sessionResult));
+
+    return SearchResponseWithSession(
+      session: session,
+      responseOrError: response,
     );
   }
 
-  static Future<void> cancelSearch() async {
+  static Future<SearchResponseWithSession> searchByPoint({
+    required  Point         point,
+    required  int           zoom,
+    required  SearchOptions searchOptions}) async {
 
-    await _channel.invokeMethod<void>('cancelSearch', null);
-  }
+    var sessionId = _nextSearchSessionId++;
 
-  static void _onSearchListenerResponse(dynamic arguments) {
+    var params = {
+      'sessionId':  sessionId,
+      'point':      point.toJson(),
+      'zoom':       zoom,
+      'options':    searchOptions.toJson(),
+    };
 
-    final Map<dynamic, dynamic> response = arguments['response'];
+    var session = SearchSession(id: sessionId);
 
-   final respObj = SearchResponse.fromJson(response);
+    final response = _channel.invokeMethod(
+        'searchByPoint',
+        params
+    ).then((sessionResult) => session.handleResponse(sessionResult));
 
-    if (_searchSessionCallback != null) {
-      _searchSessionCallback!(respObj);
-    }
-  }
-
-  static void _onSearchListenerError(dynamic arguments) {
-
-    var errMsg = arguments['error'];
-
-    if (_searchSessionCallback != null) {
-      _searchErrorCallback!(errMsg);
-    }
+    return SearchResponseWithSession(
+      session: session,
+      responseOrError: response,
+    );
   }
 }
