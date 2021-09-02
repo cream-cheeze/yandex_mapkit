@@ -70,7 +70,7 @@ import io.flutter.plugin.platform.PlatformView;
 import io.flutter.view.FlutterMain;
 
 
-public class YandexMapController implements PlatformView, MethodChannel.MethodCallHandler {
+public class YandexMapController implements PlatformView, MethodChannel.MethodCallHandler, DefaultLifecycleObserver {
 
   private final MapView mapView;
   private final MethodChannel methodChannel;
@@ -109,7 +109,7 @@ public class YandexMapController implements PlatformView, MethodChannel.MethodCa
   private Boolean userArrowOrientation;
   private int accuracyCircleFillColor = 0;
   private boolean disposed = false;
-  
+
   public YandexMapController(int id, Context context, BinaryMessenger messenger, YandexMapkitPlugin.LifecycleProvider lifecycleProvider) {
 
     this.lifecycleProvider = lifecycleProvider;
