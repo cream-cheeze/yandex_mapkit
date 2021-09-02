@@ -1,59 +1,77 @@
 part of yandex_mapkit;
 
 class PlacemarkStyle extends Equatable {
-  const PlacemarkStyle({
-    this.scale = kScale,
-    this.zIndex = kZIndex,
-    this.iconAnchor = kIconAnchor,
-    this.opacity = kOpacity,
-    this.isDraggable = false,
-    this.iconName,
-    this.rawImageData,
-    this.direction = kDirection,
-    this.rotationType = RotationType.noRotation,
-  });
-
-  final double scale;
-  final double zIndex;
-  final Point iconAnchor;
-  final double opacity;
-  final bool isDraggable;
-  final String? iconName;
-  final RotationType rotationType;
-  final double direction;
-
-  /// Provides ability to use binary image data as Placemark icon.
-  ///
-  /// You can use this property to assign dynamically generated images as [Placemark icon].
-  /// For example:
-  ///
-  /// 1) Loaded image from network
-  /// http.Response response = await http.get('image.url/image.png');
-  /// PlacemarkStyle(rawImageData: response.bodyBytes);
-  ///
-  /// 2) Generated image on client side (with Flutter), using dynamic color and icon:
-  /// ByteData data = await rootBundle.load(path);
-  /// //apply size/color transformations to data, and use it afterwards
-  /// PlacemarkStyle(rawImageData: data.buffer.asUint8List());
-  ///
-  final Uint8List? rawImageData;
 
   static const double kScale = 1.0;
   static const double kZIndex = 0.0;
   static const Point kIconAnchor = Point(latitude: 0.5, longitude: 0.5);
-  static const double kOpacity = 0.5;
-  static const double kDirection = 0;
+
+  final Point         anchor;
+  final RotationType  rotationType;
+  final double        zIndex;
+  final bool          flat;
+  final bool          visible;
+  final double        scale;
+  final Rect?         tappableArea;
+
+  const PlacemarkStyle({
+    this.anchor       = kIconAnchor,
+    this.rotationType = RotationType.noRotation,
+    this.zIndex       = kZIndex,
+    this.flat         = false,
+    this.visible      = true,
+    this.scale        = kScale,
+    this.tappableArea,
+  });
+
+  Map<String, dynamic> toJson() {
+
+    var json = {
+      'anchor': {
+        'x': anchor.latitude,
+        'y': anchor.longitude,
+      },
+      'rotationType': rotationType.index,
+      'zIndex': zIndex,
+      'flat': flat,
+      'visible': visible,
+      'scale': scale,
+    };
+
+    if (tappableArea != null) {
+      json['tappableArea'] = {
+        'min': {
+          'x': tappableArea!.min.latitude,
+          'y': tappableArea!.min.longitude,
+        },
+        'max': {
+          'x': tappableArea!.max.latitude,
+          'y': tappableArea!.max.longitude,
+        }
+      };
+    }
+
+    return json;
+  }
 
   @override
-  List<Object> get props => <Object>[
-    scale,
-    zIndex,
-    iconAnchor,
-    opacity,
-    isDraggable,
-    rotationType,
-    direction
-  ];
+  List<Object> get props {
+
+    var props = <Object>[
+      anchor,
+      rotationType,
+      zIndex,
+      flat,
+      visible,
+      scale,
+    ];
+
+    if (tappableArea != null) {
+      props.add(tappableArea!);
+    }
+
+    return props;
+  }
 
   @override
   bool get stringify => true;

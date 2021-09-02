@@ -4,28 +4,43 @@ import UIKit
 import YandexMapsMobile
 
 public class YandexMapController: NSObject, FlutterPlatformView {
-  private let methodChannel: FlutterMethodChannel!
-  private let pluginRegistrar: FlutterPluginRegistrar!
-  private let mapTapListener: MapTapListener!
-  private let mapObjectTapListener: MapObjectTapListener!
-  private var mapCameraListener: MapCameraListener!
-  private let mapSizeChangedListener: MapSizeChangedListener!
+  
+  private let methodChannel:    FlutterMethodChannel!
+  private let pluginRegistrar:  FlutterPluginRegistrar!
+  
+  private let mapTapListener:             MapTapListener!
+  private let mapObjectTapListener:       MapObjectTapListener!
+  private var mapCameraListener:          MapCameraListener!
+  private let mapSizeChangedListener:     MapSizeChangedListener!
   private var userLocationObjectListener: UserLocationObjectListener?
+  
+  private var collections: [YMKMapObjectCollection] = []
+  private var clusterizedCollections: [YMKClusterizedPlacemarkCollection] = []
+  
   private var userLocationLayer: YMKUserLocationLayer?
+  
   private var cameraTarget: YMKPlacemarkMapObject?
+  
   private var placemarks: [YMKPlacemarkMapObject] = []
-  private var polylines: [YMKPolylineMapObject] = []
-  private var polygons: [YMKPolygonMapObject] = []
-  private var circles: [YMKCircleMapObject] = []
+  private var polylines:  [YMKPolylineMapObject] = []
+  private var polygons:   [YMKPolygonMapObject] = []
+  private var circles:    [YMKCircleMapObject] = []
+  
+  private var unstyledClustersQueue: [YMKCluster] = []
+  
   public let mapView: YMKMapView
 
   public required init(id: Int64, frame: CGRect, registrar: FlutterPluginRegistrar) {
+    
     self.pluginRegistrar = registrar
+    
     self.mapView = YMKMapView(frame: frame)
+    
     self.methodChannel = FlutterMethodChannel(
       name: "yandex_mapkit/yandex_map_\(id)",
       binaryMessenger: registrar.messenger()
     )
+    
     self.mapTapListener = MapTapListener(channel: methodChannel)
     self.mapObjectTapListener = MapObjectTapListener(channel: methodChannel)
     self.mapSizeChangedListener = MapSizeChangedListener(channel: methodChannel)
@@ -82,11 +97,26 @@ public class YandexMapController: NSObject, FlutterPlatformView {
     case "disableCameraTracking":
       disableCameraTracking()
       result(nil)
+    case "addCollection":
+      addCollection(call)
+      result(nil)
     case "addPlacemark":
       addPlacemark(call)
       result(nil)
+    case "addPlacemarks":
+      addPlacemarks(call)
+      result(nil)
+    case "clusterPlacemarks":
+      clusterPlacemarks(call)
+      result(nil)
+    case "setClusterIcon":
+      setClusterIcon(call)
+      result(nil)
     case "removePlacemark":
       removePlacemark(call)
+      result(nil)
+    case "clear":
+      clear(call)
       result(nil)
     case "addPolyline":
       addPolyline(call)
@@ -332,50 +362,415 @@ public class YandexMapController: NSObject, FlutterPlatformView {
 
     return nil
   }
+  
+  public func addCollection(_ call: FlutterMethodCall) {
+    
+    let params = call.arguments as! [String: Any]
+    
+    let id            = (params["id"] as! NSNumber).intValue
+    let parentId      = (params["parentId"] as? NSNumber)?.intValue
+    let isClusterized = (params["isClusterized"] as? NSNumber)?.boolValue ?? false
+    
+    // Only plain (YMKMapObjectCollection) can be nested,YMKClusterizedPlacemarkCollection - can not
+    guard let parentCollection = getCollectionById(parentId) as? YMKMapObjectCollection else {
+      return
+    }
+
+    if !isClusterized {
+      let collection = parentCollection.add()
+      collection.userData = id
+      collections.append(collection)
+    } else {
+      let collection = parentCollection.addClusterizedPlacemarkCollection(with: self)
+      collection.userData = id
+      clusterizedCollections.append(collection)
+    }
+  }
+  
+  private func getCollectionById(_ collectionId: Int?) -> YMKMapObject? {
+    
+    if collectionId == nil {
+      return mapView.mapWindow.map.mapObjects
+    }
+    
+    if let collection = collections.first(where: { $0.userData as? Int == collectionId }) {
+      return collection
+    }
+    
+    if let clusterizedCollection = clusterizedCollections.first(where: { $0.userData as? Int == collectionId }) {
+      return clusterizedCollection
+    }
+    
+    return nil
+  }
 
   public func addPlacemark(_ call: FlutterMethodCall) {
+    
     let params = call.arguments as! [String: Any]
+    
+    let collectionId = (params["collectionId"] as? NSNumber)?.intValue
+    
     let paramsPoint = params["point"] as! [String: Any]
-    let paramsStyle = params["style"] as! [String: Any]
+    
     let point = YMKPoint(
       latitude: (paramsPoint["latitude"] as! NSNumber).doubleValue,
       longitude: (paramsPoint["longitude"] as! NSNumber).doubleValue
     )
-    let mapObjects = mapView.mapWindow.map.mapObjects
-    let placemark = mapObjects.addPlacemark(with: point)
-    let iconName = paramsStyle["iconName"] as? String
-
+    
+    var placemark: YMKPlacemarkMapObject
+    
+    let collection = getCollectionById(collectionId)
+    
+    if let plainCollection = collection as? YMKMapObjectCollection {
+      placemark = plainCollection.addPlacemark(with: point)
+    } else if let clusterizedCollection = collection as? YMKClusterizedPlacemarkCollection {
+      placemark = clusterizedCollection.addPlacemark(with: point)
+    } else {
+      return
+    }
+    
     placemark.addTapListener(with: mapObjectTapListener)
-    placemark.userData = (params["hashCode"] as! NSNumber).intValue
-    placemark.opacity = (paramsStyle["opacity"] as! NSNumber).floatValue
-    placemark.isDraggable = (paramsStyle["isDraggable"] as! NSNumber).boolValue
-    placemark.direction = (paramsStyle["direction"] as! NSNumber).floatValue
+    setupPlacemark(placemark: placemark, params: params)
 
-    if (iconName != nil) {
-      placemark.setIconWith(UIImage(named: pluginRegistrar.lookupKey(forAsset: iconName!))!)
+    placemarks.append(placemark)
+  }
+  
+  public func addPlacemarks(_ call: FlutterMethodCall) {
+    
+    let params = call.arguments as! [String: Any]
+    
+    let collectionId = (params["collectionId"] as? NSNumber)?.intValue
+    
+    guard let paramsPoint = params["points"] as? [[String: Any]] else {
+      return
+    }
+    
+    guard let ids = params["ids"] as? [Any] else {
+      return
+    }
+    
+    guard let paramsIcon  = params["icon"] as? [String: Any] else {
+      return
+    }
+    
+    var mapkitPoints: [YMKPoint] = []
+    
+    for p in paramsPoint {
+        
+      let point = YMKPoint(
+        latitude: (p["latitude"] as! NSNumber).doubleValue,
+        longitude: (p["longitude"] as! NSNumber).doubleValue
+      )
+      
+      mapkitPoints.append(point)
+    }
+    
+    guard let img = getIconImage(paramsIcon) else {
+      return
+    }
+    
+    var iconStyle = YMKIconStyle()
+    
+    if let iconStyleParam = paramsIcon["style"] as? [String: Any] {
+      iconStyle = getIconStyle(iconStyleParam)
+    }
+    
+    var newPlacemarks: [YMKPlacemarkMapObject] = []
+    
+    let collection = getCollectionById(collectionId)
+    
+    if let plainCollection = collection as? YMKMapObjectCollection {
+      newPlacemarks = plainCollection.addPlacemarks(with: mapkitPoints, image: img, style: iconStyle)
+    } else if let clusterizedCollection = collection as? YMKClusterizedPlacemarkCollection {
+      newPlacemarks = clusterizedCollection.addPlacemarks(with: mapkitPoints, image: img, style: iconStyle)
+    } else {
+      return
+    }
+    
+    for (i, p) in newPlacemarks.enumerated() {
+      
+      p.userData = ids[i] as! Int
+      
+      p.addTapListener(with: mapObjectTapListener)
     }
 
-    if let rawImageData = paramsStyle["rawImageData"] as? FlutterStandardTypedData,
-      let image = UIImage(data: rawImageData.data) {
-        placemark.setIconWith(image)
+    placemarks.append(contentsOf: newPlacemarks)
+  }
+  
+  public func removePlacemark(_ call: FlutterMethodCall) {
+    
+    let params = call.arguments as! [String: Any]
+    
+    let id = (params["id"] as! NSNumber).intValue
+    
+    guard let placemark = placemarks.first(where: { $0.userData as! Int == id }), let i = placemarks.firstIndex(of: placemark) else {
+      return
     }
+    
+    // Strange, but placemark.parent is always of YMKMapObjectCollection type,
+    // but indeed it can be of YMKClusterizedPlacemarkCollection type - in this case remove(with: placemark) throws an Exception
+    // because of wrong signatue: remove(withPlacemark: placemark) is correct.
+    // So, have to use a workaround - at first find the collection and then remove the placemark from it....
+    
+    let collection = getCollectionById(placemark.parent.userData as? Int )
+    
+    if let plainCollection = collection as? YMKMapObjectCollection {
+      plainCollection.remove(with: placemark)
+    } else if let clusterizedCollection = collection as? YMKClusterizedPlacemarkCollection {
+      clusterizedCollection.remove(withPlacemark: placemark)
+    } else {
+      return
+    }
+    
+    // Remove from local list
+    placemarks.remove(at: i)
+  }
+  
+  public func clear(_ call: FlutterMethodCall) {
+    
+    let params = call.arguments as! [String: Any]
+    
+    let collectionId = (params["collectionId"] as? NSNumber)?.intValue
+    
+    let collection = getCollectionById(collectionId)
+    
+    if let plainCollection = collection as? YMKMapObjectCollection {
+      
+      // If this is root collection (mapObjects) - just clear all objects, else - remove objects selectively from subtree of collections
+      if (collectionId == nil) {
+        
+        collections             = []
+        clusterizedCollections  = []
+          
+        placemarks.removeAll()
+        polylines.removeAll()
+        polygons.removeAll()
+        circles.removeAll()
+        
+      } else {
+        
+        var nestedCollectionsIds: [Int] = []
+        nestedCollectionsIds.append(collectionId!)
+        
+        // Get all plain (not clusterized) nested collections ids using recursive func
+        nestedCollectionsIds = getNestedCollectionsIds(nestedCollectionsIds)
+        
+        // Add all clusterized placemark collections nested in plain collections (no recursion is needed because clusterized collections can't be nested itself)
+        for cc in clusterizedCollections {
+          
+          guard let parentId = cc.parent.userData as? Int else { continue }
+          
+          if nestedCollectionsIds.contains(parentId) {
+            nestedCollectionsIds.append(cc.userData as! Int)
+          }
+        }
 
+        // Remove all placemarks which parents are in the nestedCollectionsIds list
+        placemarks.removeAll(where: ({$0.parent.userData != nil && nestedCollectionsIds.contains($0.parent.userData as! Int)}))
+        
+        // Remove all nested collections except current one
+        collections.removeAll(where: ({nestedCollectionsIds.contains($0.userData as! Int) && ($0.userData as! Int) != collectionId!}))
+        clusterizedCollections.removeAll(where: ({nestedCollectionsIds.contains($0.userData as! Int) && ($0.userData as! Int) != collectionId!}))
+        
+        /*
+         TODO: For now polylines, polygons and circles can be added only into the root collection (mapObjects),
+         so there is no need to clear corresponding arrays, but should be implemented if addPolyline, addPolygon or addCircle
+         will become to accept collectionId argument.
+        */
+        
+      }
+      
+      // Clear mapkit collection
+      plainCollection.clear()
+      
+    } else if let clusterizedCollection = collection as? YMKClusterizedPlacemarkCollection {
+      
+      // As clusterized collections can not be nested just remove all placemarks with parent = collectionId
+      placemarks.removeAll(where: ({$0.parent.userData as? Int == collectionId}))
+      
+      // Clear mapkit collection
+      clusterizedCollection.clear()
+    }
+  }
+  
+  private func getNestedCollectionsIds(_ nestedIds: [Int]) -> [Int] {
+    
+    var ids = nestedIds
+    
+    for c in collections {
+      
+      guard let id = c.userData as? Int, let parentId = c.parent.userData as? Int else {
+        continue
+      }
+      
+      if ids.contains(parentId) && !ids.contains(id) {
+        ids.append(id)
+        return getNestedCollectionsIds(ids)
+      }
+    }
+    
+    return ids
+  }
+  
+  public func clusterPlacemarks(_ call: FlutterMethodCall) {
+    
+    let params = call.arguments as! [String: Any]
+    
+    let collectionId = (params["collectionId"] as? NSNumber)?.intValue
+    
+    if (collectionId == nil) {
+      return
+    }
+    
+    guard let clusterizedCollection = clusterizedCollections.first(where: { $0.userData as? Int == collectionId }) else {
+      return
+    }
+    
+    guard let clusterRadius = (params["clusterRadius"] as? NSNumber)?.doubleValue else {
+      return
+    }
+    
+    guard let minZoom = (params["minZoom"] as? NSNumber)?.uintValue else {
+      return
+    }
+    
+    clusterizedCollection.clusterPlacemarks(withClusterRadius: clusterRadius, minZoom: minZoom)
+  }
+  
+  /// Finds cluster by hashValue in the unstyledClustersQueue and sets icon.
+  /// Can be called only once on a single cluster - cluster removes from queue after it is handled.
+  public func setClusterIcon(_ call: FlutterMethodCall) {
+    
+    let params = call.arguments as! [String: Any]
+    
+    let hashValue = (params["hashValue"] as! NSNumber).intValue
+    
+    if let i = unstyledClustersQueue.index(where: {$0.hashValue == hashValue}) {
+      
+      let cluster = unstyledClustersQueue[i]
+      
+      if let icon = params["icon"] as? [String: Any] {
+        
+        let img = getIconImage(icon)
+        
+        // Check for isValid to prevent crashes when cluster is not already showing (sometimes may be caused by Flutter interaction delay)
+        if img != nil && cluster.isValid {
+          cluster.appearance.setIconWith(img!)
+        }
+      }
+      
+      unstyledClustersQueue.remove(at: i)
+    }
+  }
+  
+  private func setupPlacemark(placemark: YMKPlacemarkMapObject, params: [String: Any]) {
+    
+    placemark.userData = (params["id"] as! NSNumber).intValue
+    
+    placemark.opacity     = (params["opacity"] as! NSNumber).floatValue
+    placemark.isDraggable = (params["isDraggable"] as! NSNumber).boolValue
+    placemark.direction   = (params["direction"] as! NSNumber).floatValue
+    placemark.isVisible   = (params["isVisible"] as! NSNumber).boolValue
+    
+    if let zIndex = (params["zIndex"] as? NSNumber)?.floatValue {
+      placemark.zIndex = zIndex
+    }
+    
+    if let icon = params["icon"] as? [String: Any] {
+      
+      let img = getIconImage(icon)
+      
+      if img != nil {
+        placemark.setIconWith(img!)
+      }
+      
+      if let iconStyle = icon["style"] as? [String: Any] {
+        let style = getIconStyle(iconStyle)
+        placemark.setIconStyleWith(style)
+      }
+      
+    } else if let composite = params["composite"] as? [String: Any] {
+      
+      for (name, iconData) in composite {
+        
+        guard let icon = iconData as? [String: Any] else {
+          continue
+        }
+        
+        guard let img = getIconImage(icon) else {
+          continue
+        }
+        
+        var style: YMKIconStyle = YMKIconStyle()
+        
+        if let iconStyle = icon["style"] as? [String: Any] {
+          style = getIconStyle(iconStyle)
+        }
+        
+        placemark.useCompositeIcon().setIconWithName(
+          name,
+          image: img,
+          style: style
+        )
+      }
+      
+    }
+  }
+  
+  private func getIconImage(_ iconData: [String: Any]) -> UIImage? {
+   
+    var img: UIImage?;
+    
+    if let iconName = iconData["iconName"] as? String {
+      img = UIImage(named: pluginRegistrar.lookupKey(forAsset: iconName))
+    } else if let rawImageData = iconData["rawImageData"] as? FlutterStandardTypedData {
+      img = UIImage(data: rawImageData.data)
+    }
+    
+    return img
+  }
+  
+  private func getIconStyle(_ styleParams: [String: Any]) -> YMKIconStyle {
+    
     let iconStyle = YMKIconStyle()
-    let rotationType = (paramsStyle["rotationType"] as! NSNumber).intValue
+
+    let rotationType = (styleParams["rotationType"] as! NSNumber).intValue
     if (rotationType == YMKRotationType.rotate.rawValue) {
       iconStyle.rotationType = (YMKRotationType.rotate.rawValue as NSNumber)
     }
+    
+    let anchor = styleParams["anchor"] as! [String: Any]
+    
     iconStyle.anchor = NSValue(cgPoint:
       CGPoint(
-        x: (paramsStyle["anchorX"] as! NSNumber).doubleValue,
-        y: (paramsStyle["anchorY"] as! NSNumber).doubleValue
+        x: (anchor["x"] as! NSNumber).doubleValue,
+        y: (anchor["y"] as! NSNumber).doubleValue
       )
     )
-    iconStyle.zIndex = (paramsStyle["zIndex"] as! NSNumber)
-    iconStyle.scale = (paramsStyle["scale"] as! NSNumber)
-    placemark.setIconStyleWith(iconStyle)
-
-    placemarks.append(placemark)
+    
+    iconStyle.zIndex = (styleParams["zIndex"] as! NSNumber)
+    iconStyle.scale = (styleParams["scale"] as! NSNumber)
+    
+    let tappableArea = styleParams["tappableArea"] as? [String: Any]
+    
+    if (tappableArea != nil) {
+      
+      let tappableAreaMin = tappableArea!["min"] as! [String: Any]
+      let tappableAreaMax = tappableArea!["max"] as! [String: Any]
+      
+      iconStyle.tappableArea = YMKRect(
+        min: CGPoint(
+          x: (tappableAreaMin["x"] as! NSNumber).doubleValue,
+          y: (tappableAreaMin["y"] as! NSNumber).doubleValue
+        ),
+        max: CGPoint(
+          x: (tappableAreaMax["x"] as! NSNumber).doubleValue,
+          y: (tappableAreaMax["y"] as! NSNumber).doubleValue
+        )
+      )
+    }
+    
+    return iconStyle
   }
 
   public func getVisibleRegion() -> [String: Any] {
@@ -386,18 +781,6 @@ public class YandexMapController: NSObject, FlutterPlatformView {
     arguments["topLeftPoint"] = ["latitude": region.topLeft.latitude, "longitude": region.topLeft.longitude]
     arguments["topRightPoint"] = ["latitude": region.topRight.latitude, "longitude": region.topRight.longitude]
     return arguments
-  }
-
-  public func removePlacemark(_ call: FlutterMethodCall) {
-    let params = call.arguments as! [String: Any]
-    let mapObjects = mapView.mapWindow.map.mapObjects
-    let hashCode = (params["hashCode"] as! NSNumber).intValue
-    let placemark = placemarks.first(where: { $0.userData as! Int == hashCode })
-
-    if (placemark != nil) {
-      mapObjects.remove(with: placemark!)
-      placemarks.remove(at: placemarks.firstIndex(of: placemark!)!)
-    }
   }
 
   public func disableCameraTracking() {
@@ -414,57 +797,44 @@ public class YandexMapController: NSObject, FlutterPlatformView {
   }
 
   public func enableCameraTracking(_ call: FlutterMethodCall) -> [String: Any] {
+    
     if mapCameraListener == nil {
       mapCameraListener = MapCameraListener(controller: self, channel: methodChannel)
       mapView.mapWindow.map.addCameraListener(with: mapCameraListener)
     }
 
+    let mapObjects = mapView.mapWindow.map.mapObjects
+    
     if cameraTarget != nil {
-      let mapObjects = mapView.mapWindow.map.mapObjects
       mapObjects.remove(with: cameraTarget!)
       cameraTarget = nil
     }
 
     let targetPoint = mapView.mapWindow.map.cameraPosition.target;
+    
     if call.arguments != nil {
+      
       let params = call.arguments as! [String: Any]
-      let paramsStyle = params["style"] as! [String: Any]
-
-      let mapObjects = mapView.mapWindow.map.mapObjects
-      cameraTarget = mapObjects.addPlacemark(with: targetPoint)
-
-      let iconName = paramsStyle["iconName"] as? String
-
-      cameraTarget!.addTapListener(with: mapObjectTapListener)
-      cameraTarget!.opacity = (paramsStyle["opacity"] as! NSNumber).floatValue
-      cameraTarget!.isDraggable = (paramsStyle["isDraggable"] as! NSNumber).boolValue
-
-      if (iconName != nil) {
-        cameraTarget!.setIconWith(UIImage(named: pluginRegistrar.lookupKey(forAsset: iconName!))!)
-      }
-
-      if let rawImageData = paramsStyle["rawImageData"] as? FlutterStandardTypedData,
-        let image = UIImage(data: rawImageData.data) {
-        cameraTarget!.setIconWith(image)
-      }
-
-      let iconStyle = YMKIconStyle()
-      iconStyle.anchor = NSValue(cgPoint:
-        CGPoint(
-          x: (paramsStyle["anchorX"] as! NSNumber).doubleValue,
-          y: (paramsStyle["anchorY"] as! NSNumber).doubleValue
+      
+      if let placemarkTemplate = params["placemarkTemplate"] as? [String: Any] {
+        
+        let paramsPoint = placemarkTemplate["point"] as! [String: Any]
+        
+        let point = YMKPoint(
+          latitude: (paramsPoint["latitude"] as! NSNumber).doubleValue,
+          longitude: (paramsPoint["longitude"] as! NSNumber).doubleValue
         )
-      )
-
-      iconStyle.zIndex = (paramsStyle["zIndex"] as! NSNumber)
-      iconStyle.scale = (paramsStyle["scale"] as! NSNumber)
-      cameraTarget!.setIconStyleWith(iconStyle)
+        
+        let placemark = mapObjects.addPlacemark(with: point)
+        setupPlacemark(placemark: placemark, params: placemarkTemplate)
+      }
     }
 
     let arguments: [String: Any] = [
       "latitude": targetPoint.latitude,
       "longitude": targetPoint.longitude
     ]
+    
     return arguments
   }
 
@@ -700,7 +1070,7 @@ public class YandexMapController: NSObject, FlutterPlatformView {
       ]
       methodChannel.invokeMethod("onMapObjectTap", arguments: arguments)
 
-      return false
+      return true
     }
   }
 
@@ -787,3 +1157,70 @@ public class YandexMapController: NSObject, FlutterPlatformView {
     mapView.mapWindow.map.isTiltGesturesEnabled = enabled
   }
 }
+
+extension YandexMapController: YMKClusterListener {
+  
+  public func onClusterAdded(with cluster: YMKCluster) {
+    
+    unstyledClustersQueue.append(cluster)
+    
+    var placemarks: [Int] = []
+    
+    // Collect array or placemarks hashCodes stored in userData
+    for p in cluster.placemarks {
+      placemarks.append(p.userData as! Int)
+    }
+    
+    let arguments: [String:Any] = [
+      "hashValue": cluster.hashValue,
+      "size": cluster.size,
+      "appearance": [
+        "opacity": cluster.appearance.opacity,
+        "direction": cluster.appearance.direction,
+        "zIndex": cluster.appearance.zIndex,
+        "geometry": [
+          "latitude": cluster.appearance.geometry.latitude,
+          "longitude": cluster.appearance.geometry.longitude,
+        ],
+      ],
+      "placemarks": placemarks
+    ]
+    
+    methodChannel.invokeMethod("onClusterAdded", arguments: arguments)
+    
+    cluster.addClusterTapListener(with: self)
+  }
+}
+
+extension YandexMapController: YMKClusterTapListener {
+ 
+  public func onClusterTap(with cluster: YMKCluster) -> Bool {
+    
+    var placemarks: [Int] = []
+    
+    // Collect array or placemarks hashCodes stored in userData
+    for p in cluster.placemarks {
+      placemarks.append(p.userData as! Int)
+    }
+    
+    let arguments: [String:Any] = [
+      "hashValue": cluster.hashValue,
+      "size": cluster.size,
+      "appearance": [
+        "opacity": cluster.appearance.opacity,
+        "direction": cluster.appearance.direction,
+        "zIndex": cluster.appearance.zIndex,
+        "geometry": [
+          "latitude": cluster.appearance.geometry.latitude,
+          "longitude": cluster.appearance.geometry.longitude,
+        ],
+      ],
+      "placemarks": placemarks
+    ]
+    
+    methodChannel.invokeMethod("onClusterTap", arguments: arguments)
+
+    return true
+  }
+}
+  
